@@ -51,6 +51,16 @@ The audio VAE is byte-identical in every Ming-3.0 release, so you need it once. 
 but only the converted VAE file carries the speaker encoder that voice cloning needs.
 The files on [nynxz/Ming-3.0](https://huggingface.co/nynxz/Ming-3.0) were made with [`scripts/convert.py`](#making-the-weights).
 
+## Workflows
+
+Drag one into ComfyUI, or open it from **Templates → Custom Nodes → ComfyUI-Ming**:
+
+- [`ming_clone_voice.json`](example_workflows/ming_clone_voice.json): clone a voice. Load Audio → Trim Audio Duration (8 s)
+  → Ming Transcribe + Ming Reference Voice → Ming TTS → VAE Decode Audio. Keep references short (3-10 s) and trim before
+  transcribing, so the transcript matches the clip exactly.
+- [`ming_builtin_voice.json`](example_workflows/ming_builtin_voice.json): a built-in voice, no reference needed.
+- [`ming_script.json`](example_workflows/ming_script.json): a multi-voice script with Ming Script.
+
 ## Nodes
 
 **Ming TTS**: model, text, task → LATENT (→ VAE Decode Audio with the Ming VAE)
