@@ -1,0 +1,11 @@
+ComfyUI-Ming
+ComfyUI port of the Ming-3.0-tts model architectures by inclusionAI
+(https://github.com/inclusionAI/Ming-3.0-tts, MIT License, Copyright (c) 2025 inclusionAI).
+The model code in ming/ is a reimplementation on ComfyUI's ops; parameter names follow the
+released checkpoints so the weights load unchanged. ming/frontend/ is vendored unchanged from
+that repository under its MIT License.
+
+The speaker encoder in ming/speaker.py reimplements CAM++ from 3D-Speaker
+(https://github.com/modelscope/3D-Speaker, Apache License 2.0).
+
+Ming-3.0-tts weights: https://huggingface.co/inclusionAI (MIT License).
