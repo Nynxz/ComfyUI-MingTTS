@@ -65,8 +65,8 @@ The files on [nynxz/Ming-3.0](https://huggingface.co/nynxz/Ming-3.0) were made w
 | built-in voice | 484 voices (5 English, 479 Chinese incl. emotion variants) | no |
 
 **language** (auto, Chinese, English, Japanese, Korean, German, French, Spanish) is a separate
-input on Ming TTS and Ming Script. It's needed for the last five. Its `language_text` socket
-overrides it with a name or code, so Ming Transcribe's `language` output can be wired straight in.
+input on Ming TTS and Ming Script. It's needed for the last five. Ming Transcribe's `language`
+output plugs straight into it.
 
 Inline sound tags work in any task: `[Breathing] [Cough] [Sigh] [Laughter] [Uhm] [Surprise-ah]
 [Surprise-oh] [Dissatisfaction-hnn] [Confirmation-en] [Question-ei] [Question-ah] [Question-en]

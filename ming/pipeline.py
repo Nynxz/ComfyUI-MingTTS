@@ -116,14 +116,27 @@ def make_voice(vae, audio, transcript="", max_seconds=20.0):
     return voice
 
 
-def length_cap(text):
-    """Upper bound on latents for a fragment, so a missed stop cannot babble on: the tiny's own
-    podcast bounds, 8 latents (0.64 s) per space-separated word of ASCII text, 4 per other character."""
+def speech_units(text):
+    """(CJK characters, other words) of a fragment, ignoring inline [tags] and punctuation."""
     import re
 
-    text = re.sub(r"\[[^\]]*\]", " ", text).strip()  # inline [tags] are short sounds
-    units = len(text.split()) * 8 if text.isascii() else len(text) * 4
-    return max(40, units + 25)
+    text = re.sub(r"\[[^\]]*\]", " ", text)
+    han = len(prompts._HAN.findall(text))
+    words = len(re.findall(r"[^\W\d_]+|\d+", prompts._HAN.sub(" ", text)))
+    return han, words
+
+
+def length_cap(text):
+    """Upper bound on latents for a fragment, so a missed stop cannot babble on: the tiny's own
+    podcast bounds, 8 latents (0.64 s) per word, 4 per CJK character."""
+    han, words = speech_units(text)
+    return max(40, han * 4 + words * 8 + 25)
+
+
+def expected_latents(text):
+    """Generous typical length (0.4 s per word, 0.24 s per CJK character), for fitting the 0.5B's context."""
+    han, words = speech_units(text)
+    return han * 3 + words * 5 + 12
 
 
 def trailing_silence_cut(wave, threshold=1e-3, tail_seconds=0.3):
@@ -158,20 +171,27 @@ def synthesize(model_patcher, text, task, voice=None, seed=0, cfg=2.0, flow_step
     whole = task.kind in ("design", "instruction")  # the reference conditions these on the utterance as a whole
     fragments = prompts.prepare_text(text, task.language, split=split and not whole, max_length=max_fragment_length, raw=tiny)
 
-    chunks, previous = [], None  # previous: (latents [1, T, 64], text) of the last fragment
-    for index, fragment in enumerate(fragments):
+    chunks, previous, index = [], None, 0  # previous: (latents [1, T, 64], text) of the last fragment
+    queue = list(fragments)
+    while queue:
+        fragment = queue.pop(0)
+        # decoding a fragment for trimming can push this model off the GPU when VRAM is tight
+        comfy.model_management.load_models_gpu([model_patcher])
         low = lower(task, model.backbone, fragment)
         use_voice = voice is not None and low.speaker != "mute"
         reference = None
         if use_voice and low.acoustic_prompt and voice.transcript:
             reference = (voice.latent_back if tiny else voice.latent_front, voice.transcript)
         # Acoustic prompts to try, best first. With ``continuity`` the previous fragment's audio and
-        # text are appended to the reference clip, so the model continues its delivery instead of
-        # starting cold; the 0.5B's 512-position context may force dropping the clip, then the carry-over.
-        candidates = [reference]
+        # text follow the reference clip, so the model continues its delivery instead of starting
+        # cold. The 0.5B's 512-position context may force dropping the clip, then the carry-over,
+        # then all prompt audio (the voice's speaker embedding still applies).
+        candidates = [reference] if reference else []
         if continuity and previous is not None and low.acoustic_prompt:
             candidates = ([join_prompts(reference, previous)] if reference else []) + [previous] + candidates
+        candidates.append(None)
         speaker = voice.speaker if use_voice else None  # None zeroes the projected row (the reference's zero/muted speaker)
+        fits = False
         for prompt in candidates:
             latent, transcript = prompt if prompt else (None, None)
             steps = 0 if latent is None else latent.shape[1]
@@ -182,11 +202,18 @@ def synthesize(model_patcher, text, task, voice=None, seed=0, cfg=2.0, flow_step
                 slots = 1 if use_voice or low.speaker != "voice" else 0
                 ids, spk_pos, lat_pos = prompts.build_input_ids(tok, prompts.tts_prompt(low.language), fragment, num_speakers=slots,
                                                                 instruction=low.instruction, prompt_text=transcript, prompt_latent_steps=steps)
-            if not model.settings.max_context or len(ids) + length_cap(fragment) <= model.settings.max_context:
+            fits = not model.settings.max_context or len(ids) + expected_latents(fragment) <= model.settings.max_context
+            if fits:
                 break
+        if not fits:
+            halves = split_in_two(fragment)
+            if halves:  # too long for one call even without prompt audio: generate it in two parts
+                queue[:0] = halves
+                continue
         embeds = model.embed_prompt(ids, spk_pos, [speaker] * len(spk_pos), lat_pos, latent, device=device, dtype=dtype)
         latents = model.generate(embeds, prompt_latent=latent, cfg=cfg, flow_steps=flow_steps, sigma=sigma, temperature=temperature,
                                  seed=seed + index, max_steps=max_steps or length_cap(fragment)).float()
+        index += 1
         if trim_vae is not None:
             wave = trim_vae.decode(latents.transpose(1, 2))[0].float().mean(-1)
             keep = trailing_silence_cut(wave)
@@ -195,6 +222,17 @@ def synthesize(model_patcher, text, task, voice=None, seed=0, cfg=2.0, flow_step
         chunks.append(latents.cpu())
         previous = (latents.cpu(), fragment)
     return torch.cat(chunks, dim=1).transpose(1, 2)
+
+
+def split_in_two(text):
+    """Split at the space (or, for CJK, the character) nearest the middle; None if too short."""
+    words = text.split(" ")
+    if len(words) >= 4:
+        mid = len(words) // 2
+        return [" ".join(words[:mid]), " ".join(words[mid:])]
+    if len(text) >= 8 and not " " in text.strip():
+        return [text[: len(text) // 2], text[len(text) // 2:]]
+    return None
 
 
 def join_prompts(first, second):

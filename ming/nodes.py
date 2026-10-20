@@ -50,17 +50,8 @@ LANGUAGE_HELP = ("The language of the text, as the prompt's 'Target language' li
                  "and Spanish; auto is fine for Chinese and English. The tiny only uses it for the speak task.")
 
 
-def language_inputs():
-    return [
-        IO.Combo.Input("language", options=list(prompts.LANGUAGES), default="auto", tooltip=LANGUAGE_HELP),
-        IO.String.Input("language_text", force_input=True, optional=True,
-                        tooltip="Overrides language when connected: a name or code (English, en, Japanese, ja...), "
-                                "e.g. Ming Transcribe's language output."),
-    ]
-
-
-def resolve_language(language, language_text=None):
-    return prompts.resolve_language(language_text if language_text and language_text.strip() else language)
+def language_input():
+    return IO.Combo.Input("language", options=list(prompts.LANGUAGES), default="auto", tooltip=LANGUAGE_HELP)
 
 
 def resolve_task(task, language=None):
@@ -105,7 +96,7 @@ class MingTTS(IO.ComfyNode):
                 IO.String.Input("text", multiline=True, default="The old radio crackled softly as the storm moved across the valley.",
                                 tooltip=PARALINGUISTIC_HELP),
                 task_input(),
-                *language_inputs(),
+                language_input(),
                 MingVoice.Input("voice", optional=True, tooltip="From Ming Reference Voice. Used by speak, emotion, speed/pitch/volume, dialect and instruction."),
                 IO.Vae.Input("vae", optional=True, tooltip="Optional Ming VAE: trims each text fragment's trailing silence before joining, like the reference."),
                 IO.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True),
@@ -127,8 +118,8 @@ class MingTTS(IO.ComfyNode):
 
     @classmethod
     def execute(cls, model, text, task, language, seed, cfg, flow_steps, temperature, sigma, split_text, max_fragment_length, continuity=True,
-                voice=None, vae=None, language_text=None) -> IO.NodeOutput:
-        latents = synthesize(model, text, resolve_task(task, resolve_language(language, language_text)), voice=voice, seed=seed, cfg=cfg, flow_steps=flow_steps, temperature=temperature,
+                voice=None, vae=None) -> IO.NodeOutput:
+        latents = synthesize(model, text, resolve_task(task, prompts.resolve_language(language)), voice=voice, seed=seed, cfg=cfg, flow_steps=flow_steps, temperature=temperature,
                              sigma=sigma, split=split_text, max_fragment_length=max_fragment_length, trim_vae=vae, continuity=continuity)
         return IO.NodeOutput({"samples": latents, "type": "audio"})
 
@@ -156,7 +147,7 @@ class MingScript(IO.ComfyNode):
                 IO.Model.Input("model"),
                 IO.Vae.Input("vae", tooltip="The Ming VAE: lines are decoded, trimmed and joined as audio."),
                 IO.String.Input("script", multiline=True, default=SCRIPT_EXAMPLE, tooltip=PARALINGUISTIC_HELP),
-                *language_inputs(),
+                language_input(),
                 MingVoice.Input("voice_1", optional=True),
                 MingVoice.Input("voice_2", optional=True),
                 MingVoice.Input("voice_3", optional=True),
@@ -172,12 +163,21 @@ class MingScript(IO.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, vae, script, language, seed, cfg, gap, flow_steps, temperature, voice_1=None, voice_2=None, voice_3=None, voice_4=None,
-                language_text=None) -> IO.NodeOutput:
+    def execute(cls, model, vae, script, language, seed, cfg, gap, flow_steps, temperature, voice_1=None, voice_2=None, voice_3=None,
+                voice_4=None) -> IO.NodeOutput:
         voices = {i: v for i, v in enumerate((voice_1, voice_2, voice_3, voice_4), start=1) if v is not None}
-        wave, timeline = render_script(model, vae, script, voices, seed=seed, gap=gap, language=resolve_language(language, language_text),
+        wave, timeline = render_script(model, vae, script, voices, seed=seed, gap=gap, language=prompts.resolve_language(language),
                                        cfg=cfg, flow_steps=flow_steps, temperature=temperature)
         return IO.NodeOutput({"waveform": wave, "sample_rate": vae.audio_sample_rate}, timeline)
+
+
+def language_option(label):
+    """The model's language label (English, Chinese, ...) -> a language dropdown value."""
+    try:
+        resolved = prompts.resolve_language(label)
+    except ValueError:
+        return "auto"
+    return next((k for k, v in prompts.LANGUAGES.items() if v == resolved), "auto") if resolved else "auto"
 
 
 class MingTranscribe(IO.ComfyNode):
@@ -194,7 +194,9 @@ class MingTranscribe(IO.ComfyNode):
                 IO.Audio.Input("audio", tooltip="Up to a few minutes of speech; it is encoded in 30 s chunks."),
                 IO.Int.Input("max_tokens", default=512, min=16, max=8192, advanced=True),
             ],
-            outputs=[IO.String.Output(display_name="transcript"), IO.String.Output(display_name="language")],
+            outputs=[IO.String.Output(display_name="transcript"),
+                     IO.Combo.Output(display_name="language", options=list(prompts.LANGUAGES),
+                                     tooltip="The detected language as a Ming TTS / Ming Script language value (auto if unsupported).")],
         )
 
     @classmethod
@@ -215,7 +217,7 @@ class MingTranscribe(IO.ComfyNode):
         language, sep, transcript = text.partition("\t")
         if not sep:  # the prompt spells the separator as a literal `\t`; accept that too
             language, sep, transcript = text.partition("\\t")
-        return IO.NodeOutput((transcript if sep else text).strip(), language.strip() if sep else "")
+        return IO.NodeOutput((transcript if sep else text).strip(), language_option(language if sep else ""))
 
 
 NODES = [MingReferenceVoice, MingTTS, MingScript, MingTranscribe]

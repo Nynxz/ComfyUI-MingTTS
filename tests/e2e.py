@@ -93,10 +93,7 @@ def main():
         return
     for name, (task, text) in cases.items():
         t = time.time()
-        # speak_en takes its language through the text socket (as from Ming Transcribe), the rest from the combo
-        language_text = "en" if name == "speak_en" else None
-        latent = nodes.MingTTS.execute(model, text, task, "English", args.seed, 2.0, 10, 0.0, 0.25, True, 50, voice=voice, vae=vae,
-                                       language_text=language_text).result[0]
+        latent = nodes.MingTTS.execute(model, text, task, "English", args.seed, 2.0, 10, 0.0, 0.25, True, 50, voice=voice, vae=vae).result[0]
         audio = vae_decode_audio(vae, latent)
         seconds = audio["waveform"].shape[-1] / audio["sample_rate"]
         save_wav(os.path.join(args.out, f"{name}.wav"), audio)
