@@ -28,7 +28,7 @@ git clone https://github.com/Nynxz/ComfyUI-MingTTS ComfyUI-Ming
 
 ## Models
 
-Download from [nynxz/ming-3.0](https://huggingface.co/nynxz/ming-3.0) into the folder shown.
+Download from [nynxz/Ming-3.0](https://huggingface.co/nynxz/Ming-3.0) into the folder shown.
 
 | File | Folder | Size | Speed (RTX 5090) | Notes |
 |---|---|---|---|---|
@@ -48,7 +48,7 @@ embeddings in bf16/fp32. Its hidden states match bf16 at cos 0.998.
 The audio VAE is byte-identical in every Ming-3.0 release, so you need it once. The released
 `Ming-3.0-tts-0.5B/model.safetensors` also loads directly in both loaders (it contains the VAE),
 but only the converted VAE file carries the speaker encoder that voice cloning needs.
-The files on [nynxz/ming-3.0](https://huggingface.co/nynxz/ming-3.0) were made with [`scripts/convert.py`](#making-the-weights).
+The files on [nynxz/Ming-3.0](https://huggingface.co/nynxz/Ming-3.0) were made with [`scripts/convert.py`](#making-the-weights).
 
 ## Nodes
 
