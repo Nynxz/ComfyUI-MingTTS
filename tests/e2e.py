@@ -73,7 +73,7 @@ def main():
 
     text_en = "Keep your eyes forward and your shoulders relaxed. One more round [Laughter], you can do this!"
     cases = {
-        "speak_en": ({"task": "speak", "language": "English"}, text_en),
+        "speak_en": ({"task": "speak"}, text_en),
         "instruction_en": ({"task": "instruction", "instruction": "Sound like an encouraging sports coach, energetic and firm without shouting."}, text_en),
         "builtin_US_James": ({"task": "built-in voice", "voice": "US_James"}, "The old radio crackled softly as the storm moved across the valley."),
         "emotion_sad": ({"task": "emotion", "emotion": "sad"}, "I waited by the window all night, but nobody came home."),
@@ -86,14 +86,17 @@ def main():
         script = nodes.SCRIPT_EXAMPLE
         for label, text in (("first", script), ("cached", script), ("one line edited", script.replace("Stay here.", "Stay right here."))):
             t = time.time()
-            audio, timeline = nodes.MingScript.execute(model, vae, text, 0, 2.0, 0.25, 10, 0.0, **voices).result
+            audio, timeline = nodes.MingScript.execute(model, vae, text, "English", 0, 2.0, 0.25, 10, 0.0, **voices).result
             print(f"script ({label}): {audio['waveform'].shape[-1] / audio['sample_rate']:.2f}s audio in {time.time() - t:.1f}s")
         print(timeline)
         save_wav(os.path.join(args.out, "script.wav"), audio)
         return
     for name, (task, text) in cases.items():
         t = time.time()
-        latent = nodes.MingTTS.execute(model, text, task, args.seed, 2.0, 10, 0.0, 0.25, True, 50, voice=voice, vae=vae).result[0]
+        # speak_en takes its language through the text socket (as from Ming Transcribe), the rest from the combo
+        language_text = "en" if name == "speak_en" else None
+        latent = nodes.MingTTS.execute(model, text, task, "English", args.seed, 2.0, 10, 0.0, 0.25, True, 50, voice=voice, vae=vae,
+                                       language_text=language_text).result[0]
         audio = vae_decode_audio(vae, latent)
         seconds = audio["waveform"].shape[-1] / audio["sample_rate"]
         save_wav(os.path.join(args.out, f"{name}.wav"), audio)

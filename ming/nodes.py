@@ -19,10 +19,7 @@ def voice_options():
 def task_input():
     D = IO.DynamicCombo
     return D.Input("task", tooltip="What the model is asked to do. Each task was trained with its own prompt; controls cannot be mixed.", options=[
-        D.Option("speak", [
-            IO.Combo.Input("language", options=list(prompts.LANGUAGES), default="auto",
-                           tooltip="Adds a 'Target language' line. Needed for Japanese, Korean, German, French, Spanish; optional for Chinese/English."),
-        ]),
+        D.Option("speak", []),
         D.Option("emotion", [IO.Combo.Input("emotion", options=list(prompts.EMOTIONS), default="happy")]),
         D.Option("speed / pitch / volume", [
             IO.Combo.Input("speed", options=["slow", "medium", "fast"], default="medium"),
@@ -49,9 +46,26 @@ KINDS = {"speak": "speak", "emotion": "emotion", "speed / pitch / volume": "basi
          "instruction": "instruction", "voice design": "design", "built-in voice": "builtin"}
 
 
-def resolve_task(task):
+LANGUAGE_HELP = ("The language of the text, as the prompt's 'Target language' line. Needed for Japanese, Korean, German, French "
+                 "and Spanish; auto is fine for Chinese and English. The tiny only uses it for the speak task.")
+
+
+def language_inputs():
+    return [
+        IO.Combo.Input("language", options=list(prompts.LANGUAGES), default="auto", tooltip=LANGUAGE_HELP),
+        IO.String.Input("language_text", force_input=True, optional=True,
+                        tooltip="Overrides language when connected: a name or code (English, en, Japanese, ja...), "
+                                "e.g. Ming Transcribe's language output."),
+    ]
+
+
+def resolve_language(language, language_text=None):
+    return prompts.resolve_language(language_text if language_text and language_text.strip() else language)
+
+
+def resolve_task(task, language=None):
     controls = {k: v for k, v in task.items() if k != "task"}
-    return Task(KINDS[task["task"]], controls)
+    return Task(KINDS[task["task"]], controls, language)
 
 
 class MingReferenceVoice(IO.ComfyNode):
@@ -91,6 +105,7 @@ class MingTTS(IO.ComfyNode):
                 IO.String.Input("text", multiline=True, default="The old radio crackled softly as the storm moved across the valley.",
                                 tooltip=PARALINGUISTIC_HELP),
                 task_input(),
+                *language_inputs(),
                 MingVoice.Input("voice", optional=True, tooltip="From Ming Reference Voice. Used by speak, emotion, speed/pitch/volume, dialect and instruction."),
                 IO.Vae.Input("vae", optional=True, tooltip="Optional Ming VAE: trims each text fragment's trailing silence before joining, like the reference."),
                 IO.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, control_after_generate=True),
@@ -111,9 +126,9 @@ class MingTTS(IO.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, text, task, seed, cfg, flow_steps, temperature, sigma, split_text, max_fragment_length, continuity=True,
-                voice=None, vae=None) -> IO.NodeOutput:
-        latents = synthesize(model, text, resolve_task(task), voice=voice, seed=seed, cfg=cfg, flow_steps=flow_steps, temperature=temperature,
+    def execute(cls, model, text, task, language, seed, cfg, flow_steps, temperature, sigma, split_text, max_fragment_length, continuity=True,
+                voice=None, vae=None, language_text=None) -> IO.NodeOutput:
+        latents = synthesize(model, text, resolve_task(task, resolve_language(language, language_text)), voice=voice, seed=seed, cfg=cfg, flow_steps=flow_steps, temperature=temperature,
                              sigma=sigma, split=split_text, max_fragment_length=max_fragment_length, trim_vae=vae, continuity=continuity)
         return IO.NodeOutput({"samples": latents, "type": "audio"})
 
@@ -141,6 +156,7 @@ class MingScript(IO.ComfyNode):
                 IO.Model.Input("model"),
                 IO.Vae.Input("vae", tooltip="The Ming VAE: lines are decoded, trimmed and joined as audio."),
                 IO.String.Input("script", multiline=True, default=SCRIPT_EXAMPLE, tooltip=PARALINGUISTIC_HELP),
+                *language_inputs(),
                 MingVoice.Input("voice_1", optional=True),
                 MingVoice.Input("voice_2", optional=True),
                 MingVoice.Input("voice_3", optional=True),
@@ -156,9 +172,11 @@ class MingScript(IO.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, vae, script, seed, cfg, gap, flow_steps, temperature, voice_1=None, voice_2=None, voice_3=None, voice_4=None) -> IO.NodeOutput:
+    def execute(cls, model, vae, script, language, seed, cfg, gap, flow_steps, temperature, voice_1=None, voice_2=None, voice_3=None, voice_4=None,
+                language_text=None) -> IO.NodeOutput:
         voices = {i: v for i, v in enumerate((voice_1, voice_2, voice_3, voice_4), start=1) if v is not None}
-        wave, timeline = render_script(model, vae, script, voices, seed=seed, gap=gap, cfg=cfg, flow_steps=flow_steps, temperature=temperature)
+        wave, timeline = render_script(model, vae, script, voices, seed=seed, gap=gap, language=resolve_language(language, language_text),
+                                       cfg=cfg, flow_steps=flow_steps, temperature=temperature)
         return IO.NodeOutput({"waveform": wave, "sample_rate": vae.audio_sample_rate}, timeline)
 
 

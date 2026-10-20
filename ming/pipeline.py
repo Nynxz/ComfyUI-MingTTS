@@ -32,6 +32,7 @@ class Task:
     """A model-independent request; ``lower`` turns it into one model's prompt fields."""
     kind: str  # speak | emotion | basic | dialect | instruction | design | builtin
     controls: dict = field(default_factory=dict)
+    language: str = None  # one of prompts.LANGUAGES' values, None = auto
 
 
 @dataclass
@@ -45,13 +46,22 @@ class Lowered:
 
 
 def lower(task, backbone, text):
+    low = _lower(task, backbone, text)
+    # the 0.5B runtime puts the 'Target language' line in the prompt for every task but dialect;
+    # the tiny's task protocol only for the speak tasks (seed/multilingual), where it is required
+    if backbone == "ling_v3":
+        if task.kind == "speak":
+            low.language = prompts.tiny_target_language(text, task.language)
+    elif task.kind != "dialect":
+        low.language = task.language
+    return low
+
+
+def _lower(task, backbone, text):
     k, c = task.kind, task.controls
     tiny = backbone == "ling_v3"
     if k == "speak":
-        language = prompts.LANGUAGES[c.get("language", "auto")]
-        if tiny:
-            language = prompts.tiny_target_language(text, language)
-        return Lowered(language=language, acoustic_prompt=True)
+        return Lowered(acoustic_prompt=True)
     if k == "emotion":
         emotion = prompts.EMOTIONS[c["emotion"]]
         if tiny:
@@ -146,8 +156,7 @@ def synthesize(model_patcher, text, task, voice=None, seed=0, cfg=2.0, flow_step
     if not text.strip():
         raise ValueError("Ming TTS: the text is empty")
     whole = task.kind in ("design", "instruction")  # the reference conditions these on the utterance as a whole
-    language = prompts.LANGUAGES.get(task.controls.get("language", "auto"))
-    fragments = prompts.prepare_text(text, language, split=split and not whole, max_length=max_fragment_length, raw=tiny)
+    fragments = prompts.prepare_text(text, task.language, split=split and not whole, max_length=max_fragment_length, raw=tiny)
 
     chunks, previous = [], None  # previous: (latents [1, T, 64], text) of the last fragment
     for index, fragment in enumerate(fragments):
@@ -205,7 +214,7 @@ class ScriptLine:
     pause: float = 0.0  # a [pause N] line
 
 
-def parse_script(script):
+def parse_script(script, language=None):
     """Lines of ``N: text`` or ``N (mods): text`` (N = voice slot, default 1), ``[pause 1.5]`` and
     ``# comments``. mods: an emotion (happy, sad, angry, fearful, disgusted, surprised, neutral),
     ``speed=fast pitch=low volume=high`` (unset ones are medium), ``voice=US_James`` (built-in),
@@ -225,13 +234,15 @@ def parse_script(script):
         speaker, mods, text = (int(m[1]), (m[2] or "").strip(), m[3].strip()) if m else (1, "", line)
         if not text:
             continue
-        lines.append(ScriptLine(speaker, text, script_task(mods)))
+        task = script_task(mods)
+        task.language = language
+        lines.append(ScriptLine(speaker, text, task))
     return lines
 
 
 def script_task(mods):
     if not mods:
-        return Task("speak", {"language": "auto"})
+        return Task("speak")
     low = mods.lower()
     if low in prompts.EMOTIONS:
         return Task("emotion", {"emotion": low})
@@ -260,20 +271,20 @@ def line_key(*parts):
 
 
 @torch.inference_mode()
-def render_script(model_patcher, vae, script, voices, seed=0, gap=0.25, **settings):
+def render_script(model_patcher, vae, script, voices, seed=0, gap=0.25, language=None, **settings):
     """Renders each line separately (seeded from its own content, so editing or inserting a line
     leaves the others' audio unchanged) and joins them with ``gap`` seconds of silence.
     Returns (waveform [1, 1, samples], timeline text)."""
     model_id = id(model_patcher.model)
     pieces, timeline, t = [], [], 0.0
-    for index, line in enumerate(parse_script(script)):
+    for index, line in enumerate(parse_script(script, language)):
         if line.pause:
             pieces.append(torch.zeros(1, 1, int(line.pause * SAMPLE_RATE)))
             t += line.pause
             continue
         voice = voices.get(line.speaker)
         line_seed = (seed + int(line_key(line.text, line.task.kind, line.task.controls)[:8], 16)) % 2 ** 63
-        key = line_key(model_id, line.speaker, line.text, line.task.kind, line.task.controls, line_seed, sorted(settings.items()),
+        key = line_key(model_id, line.speaker, line.text, line.task.kind, line.task.controls, line.task.language, line_seed, sorted(settings.items()),
                        None if voice is None else voice.speaker, None if voice is None else voice.transcript)
         audio = _LINE_CACHE.pop(key, None)
         if audio is None:

@@ -40,6 +40,23 @@ DENSE = {
 
 LANGUAGES = {"auto": None, "Chinese": "Chinese", "English": "English", "Japanese": "Japanese", "Korean": "Korean",
              "German": "German", "French": "French", "Spanish": "Spanish"}
+_LANGUAGE_ALIASES = {"zh": "Chinese", "zh-cn": "Chinese", "cantonese": "Chinese", "yue": "Chinese", "mandarin": "Chinese", "en": "English",
+                     "ja": "Japanese", "ko": "Korean", "de": "German", "fr": "French", "es": "Spanish"}
+
+
+def resolve_language(value):
+    """A language name or code (e.g. Ming Transcribe's 'English', or 'en') -> one of LANGUAGES, None for auto/empty."""
+    key = (value or "").strip().lower()
+    if key in ("", "auto"):
+        return None
+    for name in LANGUAGES:
+        if name.lower() == key:
+            return LANGUAGES[name]
+    if key in _LANGUAGE_ALIASES:
+        return _LANGUAGE_ALIASES[key]
+    raise ValueError(f"Ming TTS: unsupported language {value!r}; use one of {', '.join(n for n in LANGUAGES if n != 'auto')} (or auto)")
+
+
 # Languages whose text bypasses the Chinese/English normalizer (it reads kanji as Chinese).
 PASSTHROUGH_LANGUAGES = {"Japanese", "Korean", "German", "French", "Spanish"}
 
