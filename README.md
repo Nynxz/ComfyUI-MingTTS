@@ -23,7 +23,7 @@ Clone into `ComfyUI/custom_nodes` and restart ComfyUI:
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/Nynxz/ComfyUI-Ming
+git clone https://github.com/Nynxz/ComfyUI-MingTTS ComfyUI-Ming
 ```
 
 ## Models
