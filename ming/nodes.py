@@ -103,14 +103,18 @@ class MingTTS(IO.ComfyNode):
                                  tooltip="Split long text into fragments generated separately (the model's context is ~40 s per call)."),
                 IO.Int.Input("max_fragment_length", default=50, min=10, max=400, advanced=True,
                              tooltip="Fragment size in 'semantic length' units (a Chinese character or English word each)."),
+                IO.Boolean.Input("continuity", default=True, advanced=True,
+                                 tooltip="speak task: each fragment continues the previous one's audio (fed back as the acoustic "
+                                         "prompt with its text), so pace and tone carry across long text instead of resetting."),
             ],
             outputs=[IO.Latent.Output()],
         )
 
     @classmethod
-    def execute(cls, model, text, task, seed, cfg, flow_steps, temperature, sigma, split_text, max_fragment_length, voice=None, vae=None) -> IO.NodeOutput:
+    def execute(cls, model, text, task, seed, cfg, flow_steps, temperature, sigma, split_text, max_fragment_length, continuity=True,
+                voice=None, vae=None) -> IO.NodeOutput:
         latents = synthesize(model, text, resolve_task(task), voice=voice, seed=seed, cfg=cfg, flow_steps=flow_steps, temperature=temperature,
-                             sigma=sigma, split=split_text, max_fragment_length=max_fragment_length, trim_vae=vae)
+                             sigma=sigma, split=split_text, max_fragment_length=max_fragment_length, trim_vae=vae, continuity=continuity)
         return IO.NodeOutput({"samples": latents, "type": "audio"})
 
 

@@ -132,9 +132,10 @@ def trailing_silence_cut(wave, threshold=1e-3, tail_seconds=0.3):
 
 @torch.inference_mode()
 def synthesize(model_patcher, text, task, voice=None, seed=0, cfg=2.0, flow_steps=10, temperature=0.0, sigma=0.25,
-               split=True, max_fragment_length=50, trim_vae=None, max_steps=None):
-    """Returns latents [1, 64, T]. Fragments are generated independently with the same voice and
-    joined, each trimmed of trailing silence first when ``trim_vae`` is given."""
+               split=True, max_fragment_length=50, trim_vae=None, max_steps=None, continuity=True):
+    """Returns latents [1, 64, T]. Long text is split into fragments generated one after another
+    with the same voice; with ``continuity`` (speak task) each continues the previous fragment's
+    audio. Each fragment is trimmed of trailing silence before joining when ``trim_vae`` is given."""
     comfy.model_management.load_models_gpu([model_patcher])
     model = model_patcher.model.diffusion_model
     device = model_patcher.load_device
@@ -148,23 +149,32 @@ def synthesize(model_patcher, text, task, voice=None, seed=0, cfg=2.0, flow_step
     language = prompts.LANGUAGES.get(task.controls.get("language", "auto"))
     fragments = prompts.prepare_text(text, language, split=split and not whole, max_length=max_fragment_length, raw=tiny)
 
-    chunks = []
+    chunks, previous = [], None  # previous: (latents [1, T, 64], text) of the last fragment
     for index, fragment in enumerate(fragments):
         low = lower(task, model.backbone, fragment)
         use_voice = voice is not None and low.speaker != "mute"
-        latent = None
+        reference = None
         if use_voice and low.acoustic_prompt and voice.transcript:
-            latent = voice.latent_back if tiny else voice.latent_front
-        transcript = voice.transcript if latent is not None else None
-        steps = 0 if latent is None else latent.shape[1]
-        if tiny:
-            ids, spk_pos, lat_pos = prompts.build_input_ids_tiny(tok, fragment, low.instruction, transcript, steps, low.language)
-        else:
-            # the 0.5B runtime only adds a speaker slot for a reference voice or use_zero_spk_emb
-            slots = 1 if use_voice or low.speaker != "voice" else 0
-            ids, spk_pos, lat_pos = prompts.build_input_ids(tok, prompts.tts_prompt(low.language), fragment, num_speakers=slots,
-                                                            instruction=low.instruction, prompt_text=transcript, prompt_latent_steps=steps)
+            reference = (voice.latent_back if tiny else voice.latent_front, voice.transcript)
+        # Acoustic prompts to try, best first. With ``continuity`` the previous fragment's audio and
+        # text are appended to the reference clip, so the model continues its delivery instead of
+        # starting cold; the 0.5B's 512-position context may force dropping the clip, then the carry-over.
+        candidates = [reference]
+        if continuity and previous is not None and low.acoustic_prompt:
+            candidates = ([join_prompts(reference, previous)] if reference else []) + [previous] + candidates
         speaker = voice.speaker if use_voice else None  # None zeroes the projected row (the reference's zero/muted speaker)
+        for prompt in candidates:
+            latent, transcript = prompt if prompt else (None, None)
+            steps = 0 if latent is None else latent.shape[1]
+            if tiny:
+                ids, spk_pos, lat_pos = prompts.build_input_ids_tiny(tok, fragment, low.instruction, transcript, steps, low.language)
+            else:
+                # the 0.5B runtime only adds a speaker slot for a reference voice or use_zero_spk_emb
+                slots = 1 if use_voice or low.speaker != "voice" else 0
+                ids, spk_pos, lat_pos = prompts.build_input_ids(tok, prompts.tts_prompt(low.language), fragment, num_speakers=slots,
+                                                                instruction=low.instruction, prompt_text=transcript, prompt_latent_steps=steps)
+            if not model.settings.max_context or len(ids) + length_cap(fragment) <= model.settings.max_context:
+                break
         embeds = model.embed_prompt(ids, spk_pos, [speaker] * len(spk_pos), lat_pos, latent, device=device, dtype=dtype)
         latents = model.generate(embeds, prompt_latent=latent, cfg=cfg, flow_steps=flow_steps, sigma=sigma, temperature=temperature,
                                  seed=seed + index, max_steps=max_steps or length_cap(fragment)).float()
@@ -174,7 +184,15 @@ def synthesize(model_patcher, text, task, voice=None, seed=0, cfg=2.0, flow_step
             if keep is not None:
                 latents = latents[:, :keep]
         chunks.append(latents.cpu())
+        previous = (latents.cpu(), fragment)
     return torch.cat(chunks, dim=1).transpose(1, 2)
+
+
+def join_prompts(first, second):
+    """Concatenate two (latents, transcript) acoustic prompts."""
+    (a, ta), (b, tb) = first, second
+    space = "" if ta[-1:] and prompts._HAN.match(ta[-1]) or not ta.strip() else " "
+    return torch.cat([a, b.to(a.dtype)], dim=1), ta + space + tb
 
 
 # ---- scripts: one utterance per line, cached per line --------------------------------------
