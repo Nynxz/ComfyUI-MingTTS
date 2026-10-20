@@ -98,14 +98,25 @@ def make_voice(vae, audio, transcript="", max_seconds=20.0):
     if getattr(vae, "ming_speaker_encoder", None) is None:
         raise ValueError("Ming Reference Voice: this VAE has no speaker encoder. Load the converted "
                          "ming-3.0_audio_vae.safetensors (scripts/convert.py adds CAM++ from campplus.onnx).")
+    import logging
+
     wave, rate = audio["waveform"], audio["sample_rate"]
     mono = wave[0].float().mean(0).cpu()
-    mono = mono[: int(max_seconds * rate)] if max_seconds > 0 else mono
+    transcript = (transcript or "").strip()
+    seconds = mono.shape[-1] / rate
+    if transcript:
+        # never cut a clip that has a transcript: the model reads the transcript as what was said in
+        # the clip, and words cut from the audio get spoken first, often followed by an early stop
+        if seconds > 15:
+            logging.warning(f"Ming Reference Voice: the clip is {seconds:.1f} s; the models were trained on ~3-10 s references. "
+                            "Trim it (e.g. Trim Audio Duration) before transcribing for best results.")
+    elif max_seconds > 0:
+        mono = mono[: int(max_seconds * rate)]
     if mono.numel() == 0:
         raise ValueError("Ming Reference Voice: the reference audio is empty")
 
     speaker = vae.ming_speaker_encoder(fbank(AF.resample(mono, rate, SPEAKER_RATE)).unsqueeze(0)).detach()
-    voice = Voice(speaker=speaker, transcript=(transcript or "").strip() or None)
+    voice = Voice(speaker=speaker, transcript=transcript or None)
     if voice.transcript:
         wave44 = AF.resample(mono, rate, SAMPLE_RATE) if rate != SAMPLE_RATE else mono
         pad = -wave44.shape[-1] % ALIGN

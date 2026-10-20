@@ -70,10 +70,12 @@ class MingReferenceVoice(IO.ComfyNode):
                         "acoustically (best similarity, 'speak' task); without one only the speaker embedding is used.",
             inputs=[
                 IO.Vae.Input("vae", tooltip="The Ming AudioVAE (ming-3.0_audio_vae.safetensors), which also holds the speaker encoder."),
-                IO.Audio.Input("audio", tooltip="3-15 s of clean speech from one speaker."),
+                IO.Audio.Input("audio", tooltip="3-10 s of clean speech from one speaker works best (the models were trained on short references). "
+                                                "Trim a longer recording with Trim Audio Duration before it reaches this node and Ming Transcribe."),
                 IO.String.Input("transcript", multiline=True, default="", tooltip="Exactly what is said in the clip. Leave empty to use the speaker embedding only."),
                 IO.Float.Input("max_seconds", default=20.0, min=0.0, max=60.0, step=0.5, advanced=True,
-                               tooltip="Use only the start of the clip (0 = all). The clip counts against the 512-step context."),
+                               tooltip="Without a transcript: use only the start of the clip (0 = all). Ignored with a transcript, "
+                                       "which must match the whole clip; trim the audio itself instead."),
             ],
             outputs=[MingVoice.Output("voice")],
         )
