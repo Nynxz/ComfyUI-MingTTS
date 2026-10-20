@@ -36,7 +36,8 @@ Download from [nynxz/Ming-3.0](https://huggingface.co/nynxz/Ming-3.0) into the f
 | `ming-3.0-tts-tiny_int8_convrot.safetensors` | `models/diffusion_models` | 8.7 GB | 1.0x real time | Ling V3 MoE, 7.9B total / 1.3B active; fits a 12 GB card |
 | `ming-3.0-tts-tiny_bf16.safetensors` | `models/diffusion_models` | 15.9 GB | 0.26x when offloaded | the unquantized tiny |
 | `ming-3.0_audio_vae.safetensors` | `models/vae` | 1.6 GB | | 44.1 kHz AudioVAE + speaker encoder, shared by all |
-| `ming-3.0-audio-tiny_bf16.safetensors` | `models/text_encoders` | 18 GB | | speech recognition / audio understanding (optional) |
+| `ming-3.0-audio-tiny_int8_convrot.safetensors` | `models/text_encoders` | 9.8 GB | | speech recognition / audio understanding (optional) |
+| `ming-3.0-audio-tiny_bf16.safetensors` | `models/text_encoders` | 17.1 GB | | the unquantized audio-tiny |
 
 Real time = one second of audio per second of generation, measured per decode step (80 ms of
 audio) with the model fully on the GPU. The bf16 tiny figure is with 9.7 of its 15.9 GB on the GPU.
@@ -107,7 +108,7 @@ timeline of line timings.
 
 ## Audio understanding (Ming-3.0-audio-tiny)
 
-Load `ming-3.0-audio-tiny_bf16.safetensors` with **Load CLIP** (the type doesn't matter), then:
+Load `ming-3.0-audio-tiny_int8_convrot.safetensors` (or the bf16 file) with **Load CLIP** (the type doesn't matter), then:
 
 - **Ming Transcribe** (CLIP + AUDIO → transcript, language): the release's validated ASR prompt and
   decoding. Wire the transcript into Ming Reference Voice to clone a clip without typing it.
