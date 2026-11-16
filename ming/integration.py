@@ -158,10 +158,14 @@ def register():
 
     load_te = comfy.sd.load_text_encoder_state_dicts
     if not getattr(load_te, "_ming", False):
-        def load_text_encoder_state_dicts(state_dicts=[], embedding_directory=None, clip_type=comfy.sd.CLIPType.STABLE_DIFFUSION, model_options={}, disable_dynamic=False):
+        # **kwargs, not core's signature: core adds arguments (tokenizer_data in #17633) and a fixed list breaks every Load CLIP
+        def load_text_encoder_state_dicts(state_dicts=[], **kwargs):
             from . import textgen
             if len(state_dicts) != 1 or not textgen.is_thinker(state_dicts[0]):
-                return load_te(state_dicts, embedding_directory=embedding_directory, clip_type=clip_type, model_options=model_options, disable_dynamic=disable_dynamic)
+                return load_te(state_dicts, **kwargs)
+            embedding_directory = kwargs.get("embedding_directory")
+            model_options = kwargs.get("model_options", {})
+            disable_dynamic = kwargs.get("disable_dynamic", False)
             quant = comfy.utils.detect_layer_quantization(state_dicts[0], "")
             # build on the offload device: at 9-17 GB, the generation-time load decides what fits on the GPU
             model_options = {"initial_device": comfy.model_management.text_encoder_offload_device(), **model_options}
